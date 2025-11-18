@@ -50,6 +50,16 @@ def main():
     logs_dir.mkdir(exist_ok=True)
     input_dir.mkdir(exist_ok=True)
 
+    # Limpa diretorio temporario de execucoes anteriores
+    print("[INFO] Limpando diretorio temporario...")
+    if temp_dir.exists():
+        for item in temp_dir.iterdir():
+            if item.is_dir():
+                shutil.rmtree(item)
+            elif item.is_file():
+                item.unlink()
+    print("[INFO] Diretorio temporario limpo")
+
     # Configura logging
     processing_logger, error_logger = setup_logging(logs_dir)
     processing_logger.info("="*70)
@@ -129,8 +139,18 @@ def main():
         with open(batch_file, 'r', encoding='utf-8') as f:
             lines = f.readlines()
 
-        # Remove linhas vazias e espacos
-        urls_to_process = [line.strip() for line in lines if line.strip()]
+        # Remove linhas vazias, comentarios e espacos
+        urls_to_process = [
+            line.strip() for line in lines
+            if line.strip() and not line.strip().startswith('#')
+        ]
+
+        # Valida se ha URLs para processar
+        if not urls_to_process:
+            msg = "Arquivo batch esta vazio ou contem apenas linhas invalidas/comentarios"
+            print(f"\n[ERRO] {msg}\n")
+            error_logger.error(msg)
+            sys.exit(1)
 
         print(f"[INFO] URLs encontradas: {len(urls_to_process)}\n")
         processing_logger.info(f"Total de URLs no batch: {len(urls_to_process)}")

@@ -7,6 +7,9 @@ token.pickle
 temp/
 logs/
 
+# Arquivos de entrada do usuário
+input/*.txt
+
 # Python
 __pycache__/
 *.pyc

@@ -89,9 +89,9 @@ def validate_config() -> bool:
         return False
 
     # Validar qualidade de audio
-    valid_qualities = [0, 128, 192, 256, 320]
+    valid_qualities = [0, 128, 192, 256, 320, "best"]
     if config.AUDIO_QUALITY not in valid_qualities:
-        print(f"ERRO: AUDIO_QUALITY {config.AUDIO_QUALITY} invalida. Opcoes validas: {', '.join(map(str, valid_qualities))} ou 'best'")
+        print(f"ERRO: AUDIO_QUALITY {config.AUDIO_QUALITY} invalida. Opcoes validas: {', '.join(map(str, valid_qualities))}")
         return False
 
     # Validar duracao minima e maxima
