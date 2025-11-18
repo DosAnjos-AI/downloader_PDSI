@@ -1,0 +1,30 @@
+# Credenciais e tokens Google Drive
+credentials.json
+token.pickle
+*.pickle
+
+# Diretórios temporários
+temp/
+logs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Ambientes virtuais
+venv/
+env/
+ENV/
+
+# Variáveis de ambiente
+.env
+
+# IDEs
+.vscode/
+.idea/
+
+# Logs
+*.log
