@@ -1,33 +1,30 @@
-# Credenciais e tokens Google Drive
-credentials.json
-token.pickle
-*.pickle
-
-# Diretórios temporários
+# Pastas temporárias e outputs
 temp/
 logs/
+output/
 
-# Arquivos de entrada do usuário
-input/*.txt
+# Credenciais (caso sejam adicionadas no futuro)
+credentials.json
+token.pickle
+.env
 
 # Python
-__pycache__/
 *.pyc
-*.pyo
-*.pyd
+__pycache__/
+*.py[cod]
+*$py.class
 .Python
-
-# Ambientes virtuais
-venv/
-env/
-ENV/
-
-# Variáveis de ambiente
-.env
+build/
+dist/
+*.egg-info/
 
 # IDEs
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
 
-# Logs
-*.log
+# OS
+.DS_Store
+Thumbs.db

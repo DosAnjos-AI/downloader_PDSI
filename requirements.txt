@@ -1,22 +1,2 @@
-# Downloader PDSI - Dependencias do Projeto
-# Python 3.8 ou superior requerido
-
-# yt-dlp: Ferramenta de download de videos/audios do YouTube
-# Suporta extracao de metadados, playlists, canais e diversos formatos
-yt-dlp>=2024.1.0
-
-# google-api-python-client: Cliente oficial da API do Google Drive
-# Permite criacao de pastas, upload de arquivos e organizacao de estrutura
-google-api-python-client>=2.100.0
-
-# google-auth-oauthlib: Biblioteca de autenticacao OAuth2 para Google APIs
-# Gerencia fluxo de autenticacao, tokens e refresh automatico
-google-auth-oauthlib>=1.1.0
-
-# google-auth-httplib2: Adaptador HTTP para google-auth
-# Permite uso de requests HTTP autenticadas com credenciais OAuth2
-google-auth-httplib2>=0.1.1
-
-# pandas: Biblioteca de manipulacao de dados tabulares
-# Utilizada para leitura, escrita e processamento de arquivos CSV de metadados
-pandas>=2.0.0
+# Dependências serão adicionadas incrementalmente
+# Versão final no Prompt 10
