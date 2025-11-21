@@ -1,233 +1,218 @@
 """
-Modulo de gerenciamento de metadados CSV e JSON.
-Responsavel por salvar metadados individuais e consolidar em CSV.
+Gerenciador de metadados do Downloader Local PDSI.
+Consolida metadados em CSV pipe-separated.
 """
 
-import sys
-import os
-from pathlib import Path
-import json
 import csv
-import logging
-from typing import Optional
+import json
+from pathlib import Path
+from typing import List, Dict, Any, Optional
+from .logger import get_logger
+from .utils import sanitize_string, ensure_dir
 
-# Adiciona o diretorio raiz ao path para importar modulos
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.utils import sanitize_metadata_field
+logger = get_logger()
 
 
 class MetadataManager:
     """
-    Classe responsavel por gerenciar metadados de videos.
-
-    Salva metadados individuais em JSON e consolida todos em um CSV
-    com formato pipe-separated.
+    Gerencia extração e consolidação de metadados.
+    
+    Formato CSV: 9 campos pipe-separated
+    - id|title|duration|upload_date|uploader|uploader_id|view_count|like_count|comment_count
     """
-
-    def __init__(self, temp_dir: Path, csv_output_path: Path):
+    
+    # Campos obrigatórios do CSV
+    CSV_FIELDS = [
+        'id',
+        'title',
+        'duration',
+        'upload_date',
+        'uploader',
+        'uploader_id',
+        'view_count',
+        'like_count',
+        'comment_count'
+    ]
+    
+    def __init__(self, output_dir: Optional[Path] = None):
         """
-        Inicializa o gerenciador de metadados.
-
+        Inicializa o gerenciador.
+        
         Args:
-            temp_dir: Diretorio temporario onde ficam os arquivos JSON
-            csv_output_path: Caminho completo do arquivo CSV de saida
+            output_dir: Diretório de saída (default: output/)
         """
-        self.temp_dir = temp_dir
-        self.output_csv_path = csv_output_path
-        self.metadata_list: list[dict] = []
-
-        # Configura logger
-        self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(logging.INFO)
-
-        if not self.logger.handlers:
-            handler = logging.StreamHandler()
-            formatter = logging.Formatter(
-                '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-            )
-            handler.setFormatter(formatter)
-            self.logger.addHandler(handler)
-
-        self.logger.info(f"MetadataManager inicializado: temp_dir={temp_dir}, csv={csv_output_path}")
-
-    def save_json_metadata(self, video_id: str, metadata: dict) -> bool:
+        if output_dir is None:
+            base_dir = Path(__file__).parent.parent
+            output_dir = base_dir / "output"
+        
+        self.output_dir = Path(output_dir)
+        ensure_dir(self.output_dir)
+        
+        logger.info("MetadataManager inicializado")
+    
+    def extract_csv_fields(self, metadata: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Salva metadados completos em formato JSON.
-
-        Cria arquivo temp/video_id/video_id.json com todos os metadados
-        do video em formato JSON legivel.
-
+        Extrai os 9 campos necessários para o CSV do metadata completo.
+        
         Args:
-            video_id: ID do video do YouTube
-            metadata: Dicionario com metadados completos
-
+            metadata: Dicionário com metadados completos do yt-dlp
+            
         Returns:
-            bool: True se salvou com sucesso, False caso contrario
+            Dicionário com apenas os 9 campos do CSV
+        """
+        # Extrair campos com valores padrão
+        csv_data = {
+            'id': metadata.get('id', ''),
+            'title': sanitize_string(metadata.get('title', '')),
+            'duration': metadata.get('duration', 0),
+            'upload_date': metadata.get('upload_date', ''),
+            'uploader': sanitize_string(metadata.get('uploader', '')),
+            'uploader_id': metadata.get('uploader_id', ''),
+            'view_count': metadata.get('view_count', 0),
+            'like_count': metadata.get('like_count', 0),
+            'comment_count': metadata.get('comment_count', 0)
+        }
+        
+        # Garantir tipos corretos
+        csv_data['duration'] = int(csv_data['duration']) if csv_data['duration'] else 0
+        csv_data['view_count'] = int(csv_data['view_count']) if csv_data['view_count'] else 0
+        csv_data['like_count'] = int(csv_data['like_count']) if csv_data['like_count'] else 0
+        csv_data['comment_count'] = int(csv_data['comment_count']) if csv_data['comment_count'] else 0
+        
+        return csv_data
+    
+    def save_json_metadata(
+        self,
+        metadata: Dict[str, Any],
+        output_path: Path
+    ) -> bool:
+        """
+        Salva metadados completos em JSON (backup).
+        
+        Args:
+            metadata: Dicionário com metadados completos
+            output_path: Caminho do arquivo JSON
+            
+        Returns:
+            True se salvou com sucesso
         """
         try:
-            # Define caminho do arquivo JSON
-            video_dir = self.temp_dir / video_id
-            json_path = video_dir / f"{video_id}.json"
-
-            # Garante que o diretorio existe
-            video_dir.mkdir(parents=True, exist_ok=True)
-
-            # Salva JSON com formatacao legivel
-            with open(json_path, 'w', encoding='utf-8') as f:
-                json.dump(metadata, f, indent=2, ensure_ascii=False)
-
-            self.logger.info(f"Metadados JSON salvos: {json_path}")
+            # Extrair apenas os 9 campos do CSV para o JSON também
+            csv_fields = self.extract_csv_fields(metadata)
+            
+            with open(output_path, 'w', encoding='utf-8') as f:
+                json.dump(csv_fields, f, ensure_ascii=False, indent=2)
+            
+            logger.debug(f"JSON salvo: {output_path}")
             return True
-
+            
         except Exception as e:
-            self.logger.error(f"Erro ao salvar JSON para {video_id}: {str(e)}")
+            logger.error(f"Erro ao salvar JSON {output_path}: {str(e)}")
             return False
-
-    def add_metadata_to_batch(self, metadata: dict) -> None:
+    
+    def load_json_metadata(self, json_path: Path) -> Optional[Dict[str, Any]]:
         """
-        Adiciona metadados a lista de batch para consolidacao.
-
-        Os metadados serao incluidos no CSV quando consolidate_csv()
-        for chamado.
-
+        Carrega metadados de um arquivo JSON.
+        
         Args:
-            metadata: Dicionario com metadados do video
-        """
-        self.metadata_list.append(metadata)
-        self.logger.info(f"Metadados adicionados ao batch: {metadata.get('id', 'unknown')} (total: {len(self.metadata_list)})")
-
-    def consolidate_csv(self) -> bool:
-        """
-        Consolida todos os metadados em arquivo CSV.
-
-        Cria arquivo CSV pipe-separated com todos os metadados
-        acumulados em metadata_list. Aplica sanitizacao em todos
-        os campos de texto.
-
-        Formato: id|title|duration|upload_date|uploader|uploader_id|view_count|like_count|comment_count
-
+            json_path: Caminho do arquivo JSON
+            
         Returns:
-            bool: True se consolidou com sucesso, False caso contrario
+            Dicionário com metadados ou None se falhar
         """
-        if not self.metadata_list:
-            self.logger.warning("Nenhum metadado para consolidar")
-            return False
-
         try:
-            # Define campos do CSV na ordem correta
-            fieldnames = [
-                'id',
-                'title',
-                'duration',
-                'upload_date',
-                'uploader',
-                'uploader_id',
-                'view_count',
-                'like_count',
-                'comment_count'
-            ]
-
-            # Garante que o diretorio de saida existe
-            self.output_csv_path.parent.mkdir(parents=True, exist_ok=True)
-
-            # Escreve CSV com separador pipe
-            with open(self.output_csv_path, 'w', encoding='utf-8', newline='') as f:
+            with open(json_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            logger.error(f"Erro ao carregar JSON {json_path}: {str(e)}")
+            return None
+    
+    def consolidate_metadata_csv(
+        self,
+        metadata_dir: Path,
+        output_csv_path: Path
+    ) -> bool:
+        """
+        Consolida todos os JSONs de um diretório em um CSV.
+        
+        Args:
+            metadata_dir: Diretório com arquivos .json
+            output_csv_path: Caminho do CSV de saída
+            
+        Returns:
+            True se consolidou com sucesso
+        """
+        json_files = list(metadata_dir.glob("*.json"))
+        
+        if not json_files:
+            logger.warning(f"Nenhum arquivo JSON encontrado em {metadata_dir}")
+            return False
+        
+        logger.info(f"Consolidando {len(json_files)} metadados em CSV")
+        
+        rows = []
+        
+        for json_file in json_files:
+            metadata = self.load_json_metadata(json_file)
+            if metadata:
+                rows.append(metadata)
+        
+        if not rows:
+            logger.error("Nenhum metadado válido para consolidar")
+            return False
+        
+        try:
+            # Escrever CSV com pipe separator
+            with open(output_csv_path, 'w', encoding='utf-8', newline='') as f:
                 writer = csv.DictWriter(
                     f,
-                    fieldnames=fieldnames,
-                    delimiter='|',
-                    extrasaction='ignore'
+                    fieldnames=self.CSV_FIELDS,
+                    delimiter='|'
                 )
-
-                # Escreve header
                 writer.writeheader()
-
-                # Processa e escreve cada linha
-                for metadata in self.metadata_list:
-                    # Cria linha sanitizada
-                    row = {}
-
-                    # Campos de texto - sanitiza
-                    row['id'] = sanitize_metadata_field(str(metadata.get('id', 'Unknown')))
-                    row['title'] = sanitize_metadata_field(str(metadata.get('title', 'Unknown')))
-                    row['upload_date'] = sanitize_metadata_field(str(metadata.get('upload_date', 'Unknown')))
-                    row['uploader'] = sanitize_metadata_field(str(metadata.get('uploader', 'Unknown')))
-                    row['uploader_id'] = sanitize_metadata_field(str(metadata.get('uploader_id', 'Unknown')))
-
-                    # Campos numericos - garante valor inteiro
-                    row['duration'] = metadata.get('duration', 0) if metadata.get('duration') is not None else 0
-                    row['view_count'] = metadata.get('view_count', 0) if metadata.get('view_count') is not None else 0
-                    row['like_count'] = metadata.get('like_count', 0) if metadata.get('like_count') is not None else 0
-                    row['comment_count'] = metadata.get('comment_count', 0) if metadata.get('comment_count') is not None else 0
-
-                    writer.writerow(row)
-
-            self.logger.info(f"CSV consolidado com sucesso: {self.output_csv_path} ({len(self.metadata_list)} registros)")
+                writer.writerows(rows)
+            
+            logger.info(f"CSV consolidado salvo: {output_csv_path}")
+            logger.info(f"Total de registros: {len(rows)}")
             return True
-
+            
         except Exception as e:
-            self.logger.error(f"Erro ao consolidar CSV: {str(e)}")
+            logger.error(f"Erro ao salvar CSV {output_csv_path}: {str(e)}")
             return False
-
-    def clear_batch(self) -> None:
+    
+    def validate_csv(self, csv_path: Path) -> bool:
         """
-        Limpa a lista de metadados do batch.
-
-        Deve ser chamado apos consolidar o CSV com sucesso
-        para liberar memoria.
-        """
-        count = len(self.metadata_list)
-        self.metadata_list.clear()
-        self.logger.info(f"Batch limpo: {count} registros removidos")
-
-    def validate_metadata_integrity(self, metadata: dict) -> bool:
-        """
-        Valida integridade dos metadados.
-
-        Verifica se todos os campos obrigatorios estao presentes
-        e se os tipos de dados estao corretos.
-
+        Valida integridade de um arquivo CSV.
+        
         Args:
-            metadata: Dicionario com metadados a validar
-
+            csv_path: Caminho do arquivo CSV
+            
         Returns:
-            bool: True se metadados sao validos, False caso contrario
+            True se CSV está válido
         """
-        # Campos obrigatorios
-        required_fields = [
-            'id',
-            'title',
-            'duration',
-            'upload_date',
-            'uploader',
-            'uploader_id',
-            'view_count',
-            'like_count',
-            'comment_count'
-        ]
-
-        # Verifica presenca de todos os campos
-        for field in required_fields:
-            if field not in metadata:
-                self.logger.error(f"Campo obrigatorio ausente: {field}")
-                return False
-
-        # Valida tipos de campos numericos
-        numeric_fields = ['duration', 'view_count', 'like_count', 'comment_count']
-        for field in numeric_fields:
-            value = metadata.get(field)
-            if value is not None and not isinstance(value, int):
-                self.logger.error(f"Campo {field} deve ser int, encontrado: {type(value).__name__}")
-                return False
-
-        # Valida tipos de campos de texto
-        text_fields = ['id', 'title', 'upload_date', 'uploader', 'uploader_id']
-        for field in text_fields:
-            value = metadata.get(field)
-            if value is not None and not isinstance(value, str):
-                self.logger.error(f"Campo {field} deve ser str, encontrado: {type(value).__name__}")
-                return False
-
-        self.logger.info(f"Metadados validados com sucesso: {metadata.get('id', 'unknown')}")
-        return True
+        try:
+            with open(csv_path, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f, delimiter='|')
+                
+                # Verificar cabeçalho
+                if reader.fieldnames != self.CSV_FIELDS:
+                    logger.error(f"Cabeçalho inválido no CSV: {csv_path}")
+                    return False
+                
+                # Verificar linhas
+                row_count = 0
+                for row in reader:
+                    row_count += 1
+                    
+                    # Verificar campos obrigatórios
+                    if not row.get('id'):
+                        logger.error(f"Linha {row_count}: campo 'id' vazio")
+                        return False
+                
+                logger.info(f"CSV válido: {row_count} registros")
+                return True
+                
+        except Exception as e:
+            logger.error(f"Erro ao validar CSV {csv_path}: {str(e)}")
+            return False
