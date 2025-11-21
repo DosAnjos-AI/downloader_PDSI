@@ -1,292 +1,296 @@
 """
-Modulo core de download de audios do YouTube usando yt-dlp.
-Responsavel por detectar tipo de URL, extrair IDs, metadados e baixar audios.
+Módulo de download de áudios do YouTube usando yt-dlp.
 """
 
-import sys
-import os
-from pathlib import Path
-import subprocess
 import json
-import time
-import logging
-from typing import Optional
-
-# Adiciona o diretorio raiz ao path para importar config
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
+import subprocess
+from pathlib import Path
+from typing import Dict, List, Optional, Any
 import config
-from src.utils import random_delay
+from .logger import get_logger
+from .utils import detect_url_type, extract_source_id, ensure_dir, random_delay
+
+
+logger = get_logger()
 
 
 class YouTubeDownloader:
     """
-    Classe responsavel por gerenciar downloads de audio do YouTube.
-
-    Utiliza yt-dlp para extrair metadados e baixar audios de videos,
-    playlists e canais do YouTube.
+    Gerenciador de downloads de áudios do YouTube.
+    
+    Utiliza yt-dlp para download de vídeos, playlists e canais.
     """
-
-    def __init__(self, temp_dir: Path):
+    
+    def __init__(self, temp_dir: Optional[Path] = None):
         """
-        Inicializa o downloader do YouTube.
-
+        Inicializa o downloader.
+        
         Args:
-            temp_dir: Diretorio temporario para downloads
+            temp_dir: Diretório temporário para downloads (default: temp/)
         """
-        self.temp_dir = temp_dir
-        self.config = config
-
-        # Configura logger basico
-        self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(logging.INFO)
-
-        # Adiciona handler se nao existir
-        if not self.logger.handlers:
-            handler = logging.StreamHandler()
-            formatter = logging.Formatter(
-                '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-            )
-            handler.setFormatter(formatter)
-            self.logger.addHandler(handler)
-
-        self.logger.info(f"YouTubeDownloader inicializado com temp_dir: {temp_dir}")
-
-    def detect_url_type(self, url: str) -> str:
+        if temp_dir is None:
+            base_dir = Path(__file__).parent.parent
+            temp_dir = base_dir / "temp"
+        
+        self.temp_dir = Path(temp_dir)
+        ensure_dir(self.temp_dir)
+        
+        logger.info("YouTubeDownloader inicializado")
+    
+    def get_video_ids_from_url(self, url: str) -> tuple[List[str], str]:
         """
-        Detecta o tipo de URL do YouTube.
-
-        Analisa a estrutura da URL para determinar se e um video,
-        playlist ou canal.
-
+        Extrai lista de IDs de vídeos de uma URL.
+        
         Args:
-            url: URL do YouTube
-
+            url: URL do YouTube (vídeo, playlist ou canal)
+            
         Returns:
-            str: Tipo da URL - "video", "playlist" ou "channel"
-
-        Exemplo:
-            >>> detector.detect_url_type("https://youtube.com/watch?v=abc")
-            "video"
-            >>> detector.detect_url_type("https://youtube.com/playlist?list=PLxxx")
-            "playlist"
-            >>> detector.detect_url_type("https://youtube.com/@channel/videos")
-            "channel"
-        """
-        url_lower = url.lower()
-
-        # Detecta playlist
-        if "playlist?" in url_lower or "&list=" in url_lower:
-            self.logger.info(f"URL detectada como playlist: {url}")
-            return "playlist"
-
-        # Detecta canal (formato @channel ou /c/ ou /channel/)
-        if ("/@" in url_lower or "/c/" in url_lower or
-            "/channel/" in url_lower or "/user/" in url_lower):
-            self.logger.info(f"URL detectada como channel: {url}")
-            return "channel"
-
-        # Por padrao, considera video unico
-        self.logger.info(f"URL detectada como video: {url}")
-        return "video"
-
-    def extract_video_ids(self, url: str) -> list[str]:
-        """
-        Extrai IDs de videos de uma URL do YouTube.
-
-        Usa yt-dlp com --flat-playlist para extrair IDs sem baixar.
-        Funciona para videos unicos, playlists e canais.
-
-        Args:
-            url: URL do YouTube
-
-        Returns:
-            list[str]: Lista de IDs de videos
-
+            Tupla (lista de video_ids, source_id)
+            
         Raises:
-            RuntimeError: Se ocorrer erro ao extrair IDs
+            RuntimeError: Se falhar ao extrair IDs
         """
-        self.logger.info(f"Extraindo IDs de videos da URL: {url}")
-
-        try:
-            # Comando yt-dlp para extrair IDs
-            cmd = [
-                "yt-dlp",
-                "--flat-playlist",
-                "--get-id",
-                url
-            ]
-
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=True
-            )
-
-            # Processa output (um ID por linha)
-            video_ids = [line.strip() for line in result.stdout.split('\n') if line.strip()]
-
-            self.logger.info(f"Extraidos {len(video_ids)} video(s): {video_ids}")
-            return video_ids
-
-        except subprocess.CalledProcessError as e:
-            error_msg = f"Erro ao extrair IDs da URL {url}: {e.stderr}"
-            self.logger.error(error_msg)
-            raise RuntimeError(error_msg)
-        except Exception as e:
-            error_msg = f"Erro inesperado ao extrair IDs: {str(e)}"
-            self.logger.error(error_msg)
-            raise RuntimeError(error_msg)
-
-    def extract_metadata(self, video_id: str) -> dict:
-        """
-        Extrai metadados completos de um video do YouTube.
-
-        Usa yt-dlp com --dump-json para obter todas as informacoes
-        do video sem baixa-lo.
-
-        Args:
-            video_id: ID do video do YouTube
-
-        Returns:
-            dict: Dicionario com metadados do video contendo:
-                - id: ID do video
-                - title: Titulo do video
-                - duration: Duracao em segundos
-                - upload_date: Data de upload (YYYYMMDD)
-                - uploader: Nome do canal
-                - uploader_id: ID do canal
-                - view_count: Numero de visualizacoes
-                - like_count: Numero de likes
-                - comment_count: Numero de comentarios
-
-        Raises:
-            RuntimeError: Se ocorrer erro ao extrair metadados
-        """
-        self.logger.info(f"Extraindo metadados do video: {video_id}")
-
-        try:
-            # Comando yt-dlp para extrair metadados
-            cmd = [
-                "yt-dlp",
-                "--dump-json",
-                "--no-playlist",
-                f"https://www.youtube.com/watch?v={video_id}"
-            ]
-
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=True
-            )
-
-            # Parse JSON
-            metadata_raw = json.loads(result.stdout)
-
-            # Extrai campos relevantes e trata valores None
-            metadata = {
-                'id': metadata_raw.get('id', video_id),
-                'title': metadata_raw.get('title', 'Unknown'),
-                'duration': metadata_raw.get('duration', 0),
-                'upload_date': metadata_raw.get('upload_date', 'Unknown'),
-                'uploader': metadata_raw.get('uploader', 'Unknown'),
-                'uploader_id': metadata_raw.get('uploader_id', 'Unknown'),
-                'view_count': metadata_raw.get('view_count', 0) or 0,
-                'like_count': metadata_raw.get('like_count', 0) or 0,
-                'comment_count': metadata_raw.get('comment_count', 0) or 0
-            }
-
-            self.logger.info(f"Metadados extraidos: {metadata['title']} ({metadata['duration']}s)")
-            return metadata
-
-        except subprocess.CalledProcessError as e:
-            error_msg = f"Erro ao extrair metadados do video {video_id}: {e.stderr}"
-            self.logger.error(error_msg)
-            raise RuntimeError(error_msg)
-        except json.JSONDecodeError as e:
-            error_msg = f"Erro ao decodificar JSON dos metadados: {str(e)}"
-            self.logger.error(error_msg)
-            raise RuntimeError(error_msg)
-        except Exception as e:
-            error_msg = f"Erro inesperado ao extrair metadados: {str(e)}"
-            self.logger.error(error_msg)
-            raise RuntimeError(error_msg)
-
-    def download_audio(self, video_id: str) -> bool:
-        """
-        Baixa o audio de um video do YouTube.
-
-        Cria pasta temporaria, baixa o audio usando yt-dlp com as
-        configuracoes definidas em config.py. Aplica filtros de duracao.
-        Sistema de retry: 1 tentativa adicional em caso de falha.
-
-        Args:
-            video_id: ID do video do YouTube
-
-        Returns:
-            bool: True se download foi bem-sucedido, False caso contrario
-        """
-        self.logger.info(f"Iniciando download do audio: {video_id}")
-
-        # Cria pasta temp/video_id/
-        video_dir = self.temp_dir / video_id
-        video_dir.mkdir(parents=True, exist_ok=True)
-
-        # Monta comando yt-dlp
-        output_template = str(video_dir / f"{video_id}.%(ext)s")
-
+        url_type = detect_url_type(url)
+        source_id = extract_source_id(url, url_type)
+        
+        logger.info(f"Processando URL tipo '{url_type}': {url}")
+        logger.info(f"Source ID: {source_id}")
+        
+        # Comando yt-dlp para extrair IDs (sem baixar)
         cmd = [
             "yt-dlp",
-            "--extract-audio",
-            "--audio-format", self.config.AUDIO_FORMAT,
-            "--audio-quality", str(self.config.AUDIO_QUALITY),
-            "--match-filter",
-            f"duration >= {self.config.MIN_DURATION} & duration <= {self.config.MAX_DURATION}",
-            "-o", output_template,
-            "--no-playlist",
-            f"https://www.youtube.com/watch?v={video_id}"
+            "--flat-playlist",
+            "--print", "id",
+            "--no-warnings",
+            url
         ]
-
-        # Tenta baixar com retry
-        max_retries = 2
-        for attempt in range(1, max_retries + 1):
+        
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=config.TIMEOUT_SECONDS,
+                check=True
+            )
+            
+            video_ids = [line.strip() for line in result.stdout.strip().split('\n') if line.strip()]
+            
+            if not video_ids:
+                raise RuntimeError(f"Nenhum vídeo encontrado na URL: {url}")
+            
+            logger.info(f"Encontrados {len(video_ids)} vídeos")
+            return video_ids, source_id
+            
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(f"Timeout ao processar URL: {url}")
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(f"Erro ao extrair IDs: {e.stderr}")
+    
+    def get_video_metadata(self, video_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Extrai metadados completos de um vídeo.
+        
+        Args:
+            video_id: ID do vídeo do YouTube
+            
+        Returns:
+            Dicionário com metadados ou None se falhar
+        """
+        url = f"https://www.youtube.com/watch?v={video_id}"
+        
+        cmd = [
+            "yt-dlp",
+            "--dump-json",
+            "--no-warnings",
+            url
+        ]
+        
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=config.TIMEOUT_SECONDS,
+                check=True
+            )
+            
+            metadata = json.loads(result.stdout)
+            return metadata
+            
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, json.JSONDecodeError) as e:
+            logger.error(f"Erro ao extrair metadados do vídeo {video_id}: {str(e)}")
+            return None
+    
+    def should_skip_video(self, metadata: Dict[str, Any]) -> tuple[bool, Optional[str]]:
+        """
+        Verifica se vídeo deve ser pulado baseado nos filtros do config.
+        
+        Args:
+            metadata: Metadados do vídeo
+            
+        Returns:
+            Tupla (deve_pular, razão)
+        """
+        duration = metadata.get('duration', 0)
+        
+        # Verificar duração mínima
+        if duration < config.MIN_DURATION:
+            return True, f"Duração {duration}s < mínimo {config.MIN_DURATION}s"
+        
+        # Verificar duração máxima
+        if duration > config.MAX_DURATION:
+            return True, f"Duração {duration}s > máximo {config.MAX_DURATION}s"
+        
+        # Verificar se é menor que segmento desejado
+        if duration < config.SEGMENT_DURATION:
+            return True, f"Duração {duration}s < segmento {config.SEGMENT_DURATION}s"
+        
+        # Verificar Shorts
+        if config.SKIP_SHORTS and duration < 60:
+            return True, "YouTube Short detectado"
+        
+        return False, None
+    
+    def download_audio(
+        self,
+        video_id: str,
+        source_id: str,
+        output_filename: str = "original"
+    ) -> Optional[Path]:
+        """
+        Baixa áudio de um vídeo.
+        
+        Args:
+            video_id: ID do vídeo
+            source_id: ID da fonte (playlist/canal/video)
+            output_filename: Nome do arquivo de saída (sem extensão)
+            
+        Returns:
+            Path do arquivo baixado ou None se falhar
+        """
+        # Criar diretório de destino: temp/source_id/video_id/
+        video_dir = self.temp_dir / source_id / video_id
+        ensure_dir(video_dir)
+        
+        output_path = video_dir / f"{output_filename}.{config.AUDIO_FORMAT}"
+        
+        # Se já existe, não baixar novamente
+        if output_path.exists():
+            logger.info(f"Áudio já existe: {output_path}")
+            return output_path
+        
+        url = f"https://www.youtube.com/watch?v={video_id}"
+        
+        # Comando yt-dlp para download de áudio
+        cmd = [
+            "yt-dlp",
+            "-f", "bestaudio",
+            "-x",  # Extrair áudio
+            "--audio-format", config.AUDIO_FORMAT,
+            "--audio-quality", str(config.AUDIO_QUALITY),
+            "--output", str(output_path),
+            "--no-warnings",
+            "--no-playlist",
+            url
+        ]
+        
+        logger.info(f"Baixando áudio: {video_id}")
+        
+        for attempt in range(config.RETRY_ATTEMPTS + 1):
             try:
-                self.logger.info(f"Tentativa {attempt}/{max_retries} de download: {video_id}")
-
-                result = subprocess.run(
+                subprocess.run(
                     cmd,
                     capture_output=True,
                     text=True,
+                    timeout=config.TIMEOUT_SECONDS,
                     check=True
                 )
-
-                self.logger.info(f"Download concluido com sucesso: {video_id}")
-                return True
-
-            except subprocess.CalledProcessError as e:
-                self.logger.warning(f"Falha na tentativa {attempt}/{max_retries}: {e.stderr}")
-
-                # Se foi a ultima tentativa, retorna False
-                if attempt == max_retries:
-                    self.logger.error(f"Download falhou apos {max_retries} tentativas: {video_id}")
-                    return False
-
-                # Aguarda antes de tentar novamente
-                time.sleep(2)
-
-        return False
-
-    def apply_random_delay(self) -> None:
+                
+                if output_path.exists():
+                    logger.info(f"Download concluído: {video_id}")
+                    return output_path
+                else:
+                    raise RuntimeError("Arquivo não foi criado")
+                    
+            except (subprocess.TimeoutExpired, subprocess.CalledProcessError, RuntimeError) as e:
+                if attempt < config.RETRY_ATTEMPTS:
+                    logger.warning(f"Tentativa {attempt + 1} falhou, tentando novamente...")
+                else:
+                    logger.error(f"Falha no download após {attempt + 1} tentativas: {video_id}")
+                    return None
+        
+        return None
+    
+    def process_url(
+        self,
+        url: str,
+        skip_ids: set
+    ) -> tuple[List[str], List[str], List[str]]:
         """
-        Aplica um delay randomico entre downloads.
-
-        Usa a funcao random_delay do modulo utils com os valores
-        configurados em DELAY_MIN e DELAY_MAX para evitar bloqueios
-        por requisicoes muito frequentes.
+        Processa uma URL completa (vídeo, playlist ou canal).
+        
+        Args:
+            url: URL do YouTube
+            skip_ids: Set de IDs já processados (para skip)
+            
+        Returns:
+            Tupla (sucessos, falhas, skips) com listas de video_ids
         """
-        delay = random_delay(self.config.DELAY_MIN, self.config.DELAY_MAX)
-        self.logger.info(f"Aplicando delay de {delay} segundos...")
-        time.sleep(delay)
-        self.logger.info("Delay concluido")
+        try:
+            # Extrair lista de IDs
+            video_ids, source_id = self.get_video_ids_from_url(url)
+        except RuntimeError as e:
+            logger.error(f"Erro ao processar URL: {str(e)}")
+            return [], [url], []
+        
+        sucessos = []
+        falhas = []
+        skips = []
+        
+        total = len(video_ids)
+        
+        for idx, video_id in enumerate(video_ids, 1):
+            logger.info(f"Processando [{idx}/{total}]: {video_id}")
+            
+            # Verificar se já foi processado
+            if video_id in skip_ids:
+                logger.info(f"SKIP: Vídeo já processado anteriormente")
+                skips.append(video_id)
+                continue
+            
+            # Extrair metadados
+            metadata = self.get_video_metadata(video_id)
+            if not metadata:
+                logger.error(f"Falha ao obter metadados: {video_id}")
+                falhas.append(video_id)
+                continue
+            
+            # Verificar filtros
+            should_skip, reason = self.should_skip_video(metadata)
+            if should_skip:
+                logger.info(f"SKIP: {reason}")
+                skips.append(video_id)
+                continue
+            
+            # Baixar áudio
+            audio_path = self.download_audio(video_id, source_id)
+            
+            if audio_path:
+                # Salvar metadados JSON
+                json_path = audio_path.parent / f"{video_id}.json"
+                with open(json_path, 'w', encoding='utf-8') as f:
+                    json.dump(metadata, f, ensure_ascii=False, indent=2)
+                
+                sucessos.append(video_id)
+                
+                # Delay randômico antes do próximo
+                if idx < total:
+                    delay = random_delay(config.DELAY_MIN, config.DELAY_MAX)
+                    logger.info(f"Delay: {delay}s")
+            else:
+                falhas.append(video_id)
+        
+        logger.info(f"Processamento concluído - Sucessos: {len(sucessos)}, Falhas: {len(falhas)}, Skips: {len(skips)}")
+        
+        return sucessos, falhas, skips
