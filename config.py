@@ -1,78 +1,152 @@
-# Configuracoes do downloader_PDSI
-# Sistema local de download de audios do YouTube com upload automatico para Google Drive
+"""
+Configurações centralizadas do Downloader Local PDSI.
+Todos os parâmetros são ajustáveis pelo usuário.
+"""
 
 # ==============================================================================
-# MODO DE OPERACAO
+# MODO DE OPERAÇÃO
 # ==============================================================================
-# False: Baixar apenas uma URL (definida em URL abaixo)
-# True: Processar arquivo batch com multiplas URLs (arquivo .txt na pasta input/)
+
+# Define se processa arquivo de batch ou URL única
+# True: Lê arquivo .txt da pasta input/
+# False: Processa URL definida abaixo
 USE_BATCH_FILE = False
 
 # ==============================================================================
-# INPUT - LINK UNICO
+# INPUT - LINK ÚNICO (usado se USE_BATCH_FILE = False)
 # ==============================================================================
-# URL do video quando USE_BATCH_FILE = False
-# Exemplo: "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+
+# URL do YouTube (vídeo, playlist ou canal)
+# Exemplos:
+#   Vídeo:    "https://www.youtube.com/watch?v=VIDEO_ID"
+#   Playlist: "https://www.youtube.com/playlist?list=PLAYLIST_ID"
+#   Canal:    "https://www.youtube.com/@CHANNEL_NAME/videos"
 URL = "https://www.youtube.com/watch?v=VIDEO_ID"
 
 # ==============================================================================
-# BATCH FILE - MULTIPLOS LINKS
+# OUTPUT - NOMENCLATURA
 # ==============================================================================
-# Quando USE_BATCH_FILE = True, colocar arquivo .txt na pasta input/
-# Formato do arquivo:
-#   - Um link por linha
-#   - Sem cabecalhos
-#   - Sem linhas vazias entre os links
-#
-# Exemplo de conteudo do arquivo input/links.txt:
-#   https://www.youtube.com/watch?v=VIDEO_ID1
-#   https://www.youtube.com/watch?v=VIDEO_ID2
-#   https://www.youtube.com/watch?v=VIDEO_ID3
+
+# Nome da pasta de saída em output/
+# "default": Usa automaticamente o source_ID (playlist_ID, channel_ID ou video_ID)
+# Qualquer string: Cria pasta com o nome especificado
+# Exemplo: "minha_colecao" → output/minha_colecao/
+NOME_PASTA_OUTPUT = "default"
 
 # ==============================================================================
-# CONFIGURACOES DE AUDIO
+# CONFIGURAÇÕES DE ÁUDIO
 # ==============================================================================
-# Formato de saida do audio
-# Opcoes disponiveis: mp3, flac, wav, m4a, ogg, opus
+
+# Formato do áudio final
+# Opções: "mp3", "flac", "wav", "m4a", "ogg", "opus"
+# Recomendado: "mp3" (melhor compatibilidade)
 AUDIO_FORMAT = "mp3"
 
-# Qualidade do audio em kbps
-# Opcoes: 0 ou "best" (melhor qualidade), 320, 256, 192, 128
-# Recomendado: 320 para maxima qualidade em MP3
+# Qualidade do áudio em kbps
+# Opções:
+#   320: Qualidade máxima para MP3
+#   256: Alta qualidade (ótimo custo-benefício)
+#   192: Boa qualidade, arquivo menor
+#   128: Qualidade básica
+#   0 ou "best": Máxima qualidade disponível
 AUDIO_QUALITY = 320
 
-# Duracao minima do video em segundos (videos mais curtos serao ignorados)
-# 150 segundos = 2 minutos e 30 segundos
+# ==============================================================================
+# FILTROS DE DURAÇÃO
+# ==============================================================================
+
+# Duração mínima do vídeo em segundos
+# Vídeos com duração menor que este valor serão pulados (skip)
+# Exemplo: 150 = 2min 30s
 MIN_DURATION = 150
 
-# Duracao maxima do video em segundos (videos mais longos serao ignorados)
-# 10000 segundos = 2 horas, 46 minutos e 40 segundos
+# Duração máxima do vídeo em segundos
+# Vídeos com duração maior que este valor serão pulados (skip)
+# Exemplo: 10000 = 2h 46min 40s
 MAX_DURATION = 10000
 
 # ==============================================================================
-# DELAY RANDOMICO ENTRE DOWNLOADS
+# SEGMENTAÇÃO DE ÁUDIO
 # ==============================================================================
-# Intervalo aleatorio entre downloads para evitar bloqueio
-# O sistema aguardara um tempo aleatorio entre DELAY_MIN e DELAY_MAX segundos
+
+# Duração do segmento em segundos (primeiros X segundos do áudio)
+# O sistema cortará apenas o início do áudio
+# Restante será descartado após normalização
+# Exemplo: 150 = primeiros 2min 30s
+# Nota: Vídeos com duração < SEGMENT_DURATION serão pulados
+SEGMENT_DURATION = 150
+
+# ==============================================================================
+# NORMALIZAÇÃO DE ÁUDIO (SOX)
+# ==============================================================================
+
+# Nível alvo de normalização em decibéis (dB)
+# Valores negativos reduzem o volume de pico
+# Valores típicos:
+#   -3.0: Padrão para datasets de IA (recomendado)
+#   -1.0: Quase no limite
+#   0.0: Volume máximo (pode causar clipping)
+NORMALIZE_TARGET = -3.0
+
+# Converter áudio de stereo para mono
+# True: Converte para mono (recomendado para TTS/IA)
+# False: Mantém stereo se disponível
+CONVERT_TO_MONO = True
+
+# Taxa de amostragem alvo em Hz (sample rate)
+# Valores comuns:
+#   22050: Padrão para datasets de TTS
+#   16000: Usado em reconhecimento de fala
+#   44100: CD quality
+#   48000: Professional audio
+TARGET_SAMPLE_RATE = 22050
+
+# ==============================================================================
+# DELAY RANDÔMICO
+# ==============================================================================
+
+# Delay mínimo entre chamadas do yt-dlp em segundos
+# Evita sobrecarga e possíveis bloqueios do YouTube
 DELAY_MIN = 6
+
+# Delay máximo entre chamadas do yt-dlp em segundos
+# Um valor aleatório entre MIN e MAX será sorteado a cada download
 DELAY_MAX = 14
 
 # ==============================================================================
-# GOOGLE DRIVE - CONFIGURACOES DE UPLOAD
+# FILTROS DE CONTEÚDO
 # ==============================================================================
-# Nome da pasta de destino no Google Drive
-# Estrutura final: BD_PDSI/NOME_PASTA_DESTINO/video_ID/
-#
-# Exemplo com NOME_PASTA_DESTINO = "audios_katube":
-#   BD_PDSI/
-#       audios_katube/
-#           dQw4w9WgXcQ/
-#               audio.mp3
-#               metadata.json
-#           AbCdEfGhIjK/
-#               audio.mp3
-#               metadata.json
-#
-# A pasta BD_PDSI sera criada automaticamente na raiz do Drive
-# Cada video tera uma subpasta com seu ID unico
-NOME_PASTA_DESTINO = "audios_katube"
+
+# Pular YouTube Shorts (vídeos < 60s)
+# True: Ignora Shorts automaticamente
+# False: Processa normalmente (respeitando MIN_DURATION)
+SKIP_SHORTS = True
+
+# ==============================================================================
+# LIMPEZA E MANUTENÇÃO
+# ==============================================================================
+
+# Deletar pasta temp/ após processamento bem-sucedido
+# True: Limpa automaticamente (recomendado)
+# False: Mantém arquivos temporários (útil para debug)
+AUTO_CLEANUP_TEMP = True
+
+# Manter áudio original não-processado em output/
+# True: Salva original.mp3 + processado.mp3
+# False: Salva apenas o áudio final normalizado (recomendado)
+KEEP_ORIGINAL_AUDIO = False
+
+# ==============================================================================
+# RETRY E TIMEOUT
+# ==============================================================================
+
+# Número de tentativas adicionais em caso de falha no download
+# 0: Sem retry, pula imediatamente
+# 1: Tenta mais uma vez antes de pular (recomendado)
+# 2+: Múltiplas tentativas (pode aumentar tempo total)
+RETRY_ATTEMPTS = 1
+
+# Timeout para cada download em segundos
+# Após este tempo sem resposta, o download é cancelado
+# Exemplo: 300 = 5 minutos
+TIMEOUT_SECONDS = 300
